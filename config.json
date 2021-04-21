@@ -1,0 +1,136 @@
+{
+  "snmp": {
+    "community": "N5xmHZgD6HM84aB",
+    "version": 2
+  },
+  "hosts": {
+    "ac1": {
+      "ip": "46.21.128.3",
+      "brand": "redback",
+      "nb_sub": 0
+    },
+    "ac2": {
+      "ip": "46.21.128.23",
+      "brand": "redback",
+      "nb_sub": 0
+    },
+    "roc1": {
+      "ip": "46.21.128.9",
+      "brand": "cisco",
+      "nb_sub": 0
+    },
+    "roc2": {
+      "ip": "46.21.128.10",
+      "brand": "cisco",
+      "nb_sub": 0
+    }
+  },
+  "type": {
+    "sfreaf": {
+      "nb_sub": 0,
+      "realm": "kertel.ppp",
+      "vlan": 200,
+      "novlan": 0
+    },
+    "sfrclan": {
+      "nb_sub": 0,
+      "realm": "kertel.ppp",
+      "vlan": 202,
+      "novlan": 0
+    },
+    "covagebpe": {
+      "nb_sub": 0,
+      "realm": "kertel.ppp",
+      "vlan": 204,
+      "novlan": 0
+    },
+    "covagebpea": {
+      "nb_sub": 0,
+      "realm": "kertel.ppp",
+      "vlan": 205,
+      "novlan": 0
+    },
+    "sfrbsod": {
+      "nb_sub": 0,
+      "realm": "kertel.ppp",
+      "vlan": 208,
+      "novlan": 0
+    },
+    "orangec2e": {
+      "nb_sub": 0,
+      "realm": "ictelecom.ipadsl",
+      "vlan": 212,
+      "novlan": 0
+    },
+    "orangeoptimum": {
+      "nb_sub": 0,
+      "realm": "ictel.centrex",
+      "vlan": 214,
+      "novlan": 0
+    },
+    "tdf": {
+      "nb_sub": 0,
+      "realm": "kertel.tdf",
+      "vlan": 219,
+      "novlan": 0
+    },
+    "kosceaf": {
+      "nb_sub": 0,
+      "realm": "kertel.kosc",
+      "vlan": 800,
+      "novlan": 0
+    },
+    "kosc": {
+      "nb_sub": 0,
+      "realm": "kertel.kosc",
+      "vlan": 216,
+      "novlan": 800
+    },
+    "axione": {
+      "nb_sub": 0,
+      "realm": "kertel.axione",
+      "vlan": 222,
+      "novlan": 0
+    },
+    "sfrftth": {
+      "nb_sub": 0,
+      "realm": "kertel.dop",
+      "vlan": 1201,
+      "novlan": 0
+    },
+    "sfrsdsl": {
+      "nb_sub": 0,
+      "realm": "ictelecom.dop",
+      "vlan": 1200,
+      "novlan": 0
+    },
+    "sfradsl": {
+      "nb_sub": 0,
+      "realm": "ictelecom.ipadsl",
+      "vlan": 1204,
+      "novlan": 0
+    },
+    "bytelftth": {
+      "nb_sub": 0,
+      "realm": "kertel.bytel",
+      "vlan": 976,
+      "novlan": 0
+    },
+    "l2tp": {
+      "nb_sub": 0,
+      "realm" : "kertel.ppp",
+      "vlan": 0,
+      "novlan": 0
+    },
+    "test": {
+      "nb_sub": 0,
+      "realm": "*",
+      "vlan": 223,
+      "novlan": 0
+    }
+  },
+  "influx": {
+    "host": "monitor01.kertel.in",
+    "port": 8086
+  }
+}

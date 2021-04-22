@@ -10,7 +10,7 @@ from datetime import timedelta
 
 # Variables and Constants
 long_logins = []
-link_login = []
+link_logins = []
 connected_logins = []
 db_logins = []
 result = []
@@ -95,10 +95,10 @@ def redbackSNMPWalk(data, ip, version, community):
             vlan = vlan
         else:
             vlan = loginClassify(data, realm)
-        long_logins.append(
+        connected_logins.append(
             {
                 'user': user,
-                'type': vlan,
+                'vlan': vlan,
                 'status': True
             }
         )
@@ -185,17 +185,25 @@ def ciscoSNMPGet(data, h, ip, version, community):
     for i in range(data['hosts'][h]['nb_sub']):
         try:
             reply = session.getnext(vars_list)
-            type = (int(reply[0].decode("utf-8").split('/')[-1].split('.')[0]))
+            vlan = (int(reply[0].decode("utf-8").split('/')[-1].split('.')[0]))
             realm = (reply[1].decode("utf-8").split('.', 1)[1])
             user = (reply[2].decode("utf-8"))
-            if type != 0:
-                long_logins.append(
-                    (user, (psycopg2.TimestampFromTicks(time.time() // 1)), True, type, True)
+            if vlan != 0:
+                connected_logins.append(
+                    {
+                        'user': user,
+                        'vlan': vlan,
+                        'status': True
+                    }
                 )
             else:
-                type = loginClassify(data, realm)
-                long_logins.append(
-                    (user, (psycopg2.TimestampFromTicks(time.time() // 1)), True, type, True)
+                vlan = loginClassify(data, realm)
+                connected_logins.append(
+                    {
+                        'user': user,
+                        'vlan': vlan,
+                        'status': True
+                    }
                 )
         except IndexError:
             print(reply)
@@ -257,8 +265,8 @@ def main():
             '''
             Get logins connected to redback routers, store them in long_logins[] as dictionary{vlan: realm: user:}
             '''
-            # if brand == 'redback':
-            #     redbackSNMPWalk(data, ip, data['snmp']['version'], data['snmp']['community'])
+            if brand == 'redback':
+                redbackSNMPWalk(data, ip, data['snmp']['version'], data['snmp']['community'])
             '''
             Get logins connected to cisco routers, store them in long_logins[] as dictionary{vlan: realm: user:}
             '''
@@ -272,48 +280,44 @@ def main():
         '''
         Update link status for long_logins in new format <IP.........-.-L--@realm>
         '''
-        print(long_logins)
-        breakpoint()
-        # print('SQL connected logins')
-        # print("--- %s seconds ---" % (time.time() - start_time))
-        # for long_login in long_logins:
-        #     link_login.append(long_login['user'][:12])
-        #     short_logins.add(long_login['user'])
-        #     if 'factory' in long_login['user']:
-        #         pass
-        #     else:
-        #         cur.mogrify(upsert_up, tuple)
-        #         breakpoint()
-        #         push_login_to_db(cur, long_login['user'], True, long_login['type'])
-        #
-        # print('SQL select all')
-        # print("--- %s seconds ---" % (time.time() - start_time))
-        # cur.execute(select_all_query)
-        # select_all = cur.fetchall()
-        # for db_login, db_date_down, db_date_up, db_link_status, db_type, db_login_status in select_all:
-        #     db_logins.append(
-        #         {
-        #             'user': db_login,
-        #             'type': db_type,
-        #             'status': db_login_status
-        #         }
-        #     )
-        #
-        # print('SQL db_login')
-        # print("--- %s seconds ---" % (time.time() - start_time))
-        # for db_login in db_logins:
-        #     if 'factory' in db_login['user']:
-        #         pass
-        #     else:
-        #         if db_login['user'] not in short_logins:
-        #             push_login_to_db(cur, db_login['user'], False, db_login['type'])
-        #         if db_login['user'][:12] not in link_login:
-        #             cur.execute(update_link_status, (False, db_login['user']))
-        #         else:
-        #             cur.execute(update_link_status, (True, db_login['user']))
-        # '''
-        # SQL commit
-        # '''
+        print('SQL connected logins')
+        print("--- %s seconds ---" % (time.time() - start_time))
+        for c_login in connected_logins:
+            link_logins.append(c_login['user'][:12])
+            short_logins.add(c_login['user'])
+            if 'factory' in c_login['user']:
+                pass
+            else:
+                push_login_to_db(cur, c_login['user'], True, c_login['vlan'])
+
+        print('SQL select all')
+        print("--- %s seconds ---" % (time.time() - start_time))
+        cur.execute(select_all_query)
+        select_all = cur.fetchall()
+        for db_login, db_date_down, db_date_up, db_link_status, db_type, db_login_status in select_all:
+            db_logins.append(
+                {
+                    'user': db_login,
+                    'vlan': db_type,
+                    'status': db_login_status
+                }
+            )
+
+        print('SQL db_login')
+        print("--- %s seconds ---" % (time.time() - start_time))
+        for db_login in db_logins:
+            if 'factory' in db_login['user']:
+                pass
+            else:
+                if db_login['user'] not in short_logins:
+                    push_login_to_db(cur, db_login['user'], False, db_login['vlan'])
+                if db_login['user'][:12] not in link_logins:
+                    cur.execute(update_link_status, (False, db_login['user']))
+                else:
+                    cur.execute(update_link_status, (True, db_login['user']))
+        '''
+        SQL commit
+        '''
         conn.commit()
         conn.close()
     print("PostgreSQL connection pool is closed")

@@ -55,8 +55,8 @@ def redbackSNMPWalk(data, ip, version, community):
     oid = ".1.3.6.1.4.1.2352.2.27.1.1.1.1.3"
     var = netsnmp.Varbind(oid)
     vars_list = netsnmp.VarList(var)
-    print("--- %s seconds ---" % (time.time() - start_time))
-    print(f'Snmp walk to {ip}')
+    logging.debug("--- %s seconds ---" % (time.time() - start_time))
+    logging.debug(f'Snmp walk to {ip}')
     subscribers = (session.walk(vars_list))
     i = 0
     for sub in subscribers:
@@ -155,8 +155,8 @@ def ciscoSNMPGet(data, h, ip, version, community):
     vars_list = netsnmp.VarList(var_oid_22, var_oid_23, var_oid_24)
     session = netsnmp.Session(DestHost=ip, Version=version, Community=community)
     session.UseLongNames = 1
-    print("--- %s seconds ---" % (time.time() - start_time))
-    print(f'Snmp walk to {ip}')
+    logging.debug("--- %s seconds ---" % (time.time() - start_time))
+    logging.debug(f'Snmp walk to {ip}')
     for i in range(data['hosts'][h]['nb_sub']):
         try:
             reply = session.getnext(vars_list)
@@ -221,7 +221,8 @@ def sql_conn():
 # Launch the script every X seconds
 # @tl.job(interval=timedelta(seconds=300))
 def main():
-    logging.info("starting link monitoring")
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s -  %(levelname)s - %(message)s')
+    logging.debug('starting link monitoring')
     '''
     Pushing collected data in DB
     '''
@@ -251,8 +252,8 @@ def main():
         '''
         Update link status for long_logins in new format <IP.........-.-L--@realm>
         '''
-        print('SQL connected logins')
-        print("--- %s seconds ---" % (time.time() - start_time))
+        logging.debug('SQL connected logins')
+        logging.debug("--- %s seconds ---" % (time.time() - start_time))
         for c_login in connected_logins:
             link_logins.append(c_login[0][:12])
             short_logins.add(c_login[0])
@@ -260,8 +261,8 @@ def main():
         psycopg2.extras.execute_values(cur, upsert, c_logins)
         conn.commit()
 
-        print('SQL select all')
-        print("--- %s seconds ---" % (time.time() - start_time))
+        logging.debug('SQL select all')
+        logging.debug("--- %s seconds ---" % (time.time() - start_time))
         cur.execute(select_all_query)
         select_all = cur.fetchall()
         for db_login, db_last_down, db_last_up, db_link_status, db_type, db_login_status in select_all:
@@ -276,9 +277,16 @@ def main():
                 )
             )
 
-        print('SQL db_login')
-        print("--- %s seconds ---" % (time.time() - start_time))
+        logging.debug('SQL db_login')
+        logging.debug("--- %s seconds ---" % (time.time() - start_time))
+        """
+        For each login in db_login check if username(db_login[0]) is in short_login,
+        if not set login status db_login[5] to False
+        """
         [db_login[5] is False for db_login in db_logins if db_login[0] not in short_logins]
+        """
+        Same check for 12 first caracters of username for link status
+        """
         [db_login[3] is False if db_login[0][:12] not in link_logins else db_login[3] is True for db_login in db_logins]
         c_logins = set(tuple(i) for i in db_logins)
         psycopg2.extras.execute_values(cur, upsert, c_logins)
@@ -287,8 +295,8 @@ def main():
         '''
         conn.commit()
         conn.close()
-    print("PostgreSQL connection pool is closed")
-    logging.info("stopping link monitoring")
+    logging.debug("PostgreSQL connection pool is closed")
+    logging.debug("stopping link monitoring")
 
 
 if __name__ == "__main__":

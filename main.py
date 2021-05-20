@@ -4,29 +4,42 @@ import json
 import psycopg2
 import time
 import re
-import sys
-import os
-import pandas as pd
-from io import StringIO
+import logging
+from psycopg2 import extras
+from timeloop import Timeloop
+from datetime import timedelta
 
 # Variables and Constants
+long_logins = []
+link_logins = []
+connected_logins = []
+db_logins = []
+result = []
+
+short_logins = set()
 
 OID_CISCO_1 = '.1.3.6.1.4.1.9.9.786.1.2.1.1.6.1.1'
 OID_CISCO_22 = '.1.3.6.1.4.1.9.9.786.1.1.1.1.22'
 OID_CISCO_23 = '.1.3.6.1.4.1.9.9.786.1.1.1.1.23'
 OID_CISCO_24 = '.1.3.6.1.4.1.9.9.786.1.1.1.1.24'
 
+tl = Timeloop()
+
 re_new_login = re.compile('^\w{2}\d{6,8}-\d-L\d{2}')
 
-dict_connected = {'username': [], 'last_down': [], 'last_up': [], 'status': [], 'subtype': [], 'login_status': []}
+select_all_query = """SELECT * FROM old_login;"""
 
-# Connection parameters
-param_dic = {
-    "host": "172.22.0.11",
-    "database": "login_status",
-    "user": "postgres",
-    "password": "MilKa;MeuH"
-}
+update_round_timestamp = """
+                        UPDATE all_purpose SET value = %s WHERE title = %s;
+                        """
+
+upsert = """
+            INSERT INTO old_login (username, last_down, last_up, status, subtype, login_status) \
+            VALUES %s \
+            ON CONFLICT (username) \
+            DO UPDATE SET last_up = excluded.last_up, status = excluded.status, subtype = excluded.subtype, \
+            login_status = excluded.login_status WHERE old_login.username = excluded.username;
+            """
 
 
 def redbackSNMPWalk(data, ip, version, community):
@@ -42,24 +55,28 @@ def redbackSNMPWalk(data, ip, version, community):
     oid = ".1.3.6.1.4.1.2352.2.27.1.1.1.1.3"
     var = netsnmp.Varbind(oid)
     vars_list = netsnmp.VarList(var)
-    print("--- %s seconds ---" % (time.time() - start_time))
-    print(f'Snmp walk to {ip}')
+    logging.debug("--- %s seconds ---" % (time.time() - start_time))
+    logging.debug(f'Snmp walk to {ip}')
     subscribers = (session.walk(vars_list))
     i = 0
     for sub in subscribers:
-        vlan = redbackVlanFind(sub)
+        subtype = redbackVlanFind(sub)
         user = redbackLoginDecode(vars_list[i].tag)
         realm = ".".join(user.split('@')[1].split('.')[1:3])
-        if vlan != 0:
-            vlan = vlan
+        if subtype != 0:
+            subtype = subtype
         else:
-            vlan = loginClassify(data, realm)
-        dict_connected['username'].append(user)
-        dict_connected['last_down'].append(0)
-        dict_connected['last_up'].append(psycopg2.TimestampFromTicks(time.time() // 1))
-        dict_connected['status'].append(True)
-        dict_connected['subtype'].append(vlan)
-        dict_connected['login_status'].append(True)
+            subtype = loginClassify(data, realm)
+        connected_logins.append(
+            (
+                user,
+                psycopg2.TimestampFromTicks(time.time() // 1),
+                psycopg2.TimestampFromTicks(time.time() // 1),
+                True,
+                subtype,
+                True
+            )
+        )
         i += 1
 
 
@@ -138,29 +155,37 @@ def ciscoSNMPGet(data, h, ip, version, community):
     vars_list = netsnmp.VarList(var_oid_22, var_oid_23, var_oid_24)
     session = netsnmp.Session(DestHost=ip, Version=version, Community=community)
     session.UseLongNames = 1
-    print("--- %s seconds ---" % (time.time() - start_time))
-    print(f'Snmp walk to {ip}')
+    logging.debug("--- %s seconds ---" % (time.time() - start_time))
+    logging.debug(f'Snmp walk to {ip}')
     for i in range(data['hosts'][h]['nb_sub']):
         try:
             reply = session.getnext(vars_list)
-            type = (int(reply[0].decode("utf-8").split('/')[-1].split('.')[0]))
+            subtype = (int(reply[0].decode("utf-8").split('/')[-1].split('.')[0]))
             realm = (reply[1].decode("utf-8").split('.', 1)[1])
             user = (reply[2].decode("utf-8"))
-            if type != 0:
-                dict_connected['username'].append(user)
-                dict_connected['last_down'].append(0)
-                dict_connected['last_up'].append(psycopg2.TimestampFromTicks(time.time() // 1))
-                dict_connected['status'].append(True)
-                dict_connected['subtype'].append(type)
-                dict_connected['login_status'].append(True)
+            if subtype != 0:
+                connected_logins.append(
+                    (
+                        user,
+                        psycopg2.TimestampFromTicks(time.time() // 1),
+                        psycopg2.TimestampFromTicks(time.time() // 1),
+                        True,
+                        subtype,
+                        True
+                    )
+                )
             else:
-                vlan = loginClassify(data, realm)
-                dict_connected['username'].append(user)
-                dict_connected['last_down'].append(0)
-                dict_connected['last_up'].append(psycopg2.TimestampFromTicks(time.time() // 1))
-                dict_connected['status'].append(True)
-                dict_connected['subtype'].append(vlan)
-                dict_connected['login_status'].append(True)
+                subtype = loginClassify(data, realm)
+                connected_logins.append(
+                    (
+                        user,
+                        psycopg2.TimestampFromTicks(time.time() // 1),
+                        psycopg2.TimestampFromTicks(time.time() // 1),
+                        True,
+                        subtype,
+                        True
+                    )
+                )
         except IndexError:
             print(reply)
             pass
@@ -176,78 +201,34 @@ def loginClassify(data, realm):
     for t in data['type']:
         if data['type'][t]['realm'] == realm:
             try:
-                vlan = data['type'][t]['vlan']
-                return vlan
+                subtype = data['type'][t]['vlan']
+                return subtype
             except UnboundLocalError:
                 print(realm)
                 print(data['type'][t]['vlan'])
                 pass
 
 
-def connect(params_dic):
-    """ Connect to the PostgreSQL database server """
-    conn = 0
-    try:
-        # connect to the PostgreSQL server
-        print('Connecting to the PostgreSQL database...')
-        conn = psycopg2.connect(**params_dic)
-    except (Exception, psycopg2.DatabaseError) as error:
-        print(error)
-        sys.exit(1)
-    print("Connection successful")
+def sql_conn():
+    conn = psycopg2.connect(
+        host="10.10.10.1",
+        database="database_name",
+        user="user",
+        password="password")
     return conn
 
 
-def copy_from_file(conn, df, table):
-    """
-    Here we are going save the dataframe on disk as
-    a csv file, load the csv file
-    and use copy_from() to copy it to the table
-    """
-    # Save the dataframe to disk
-    tmp_df = "./tmp_dataframe.csv"
-    df.to_csv(tmp_df, index=False, header=False)
-    f = open(tmp_df, 'r')
-    cursor = conn.cursor()
-    try:
-        cursor.copy_from(f, table, sep=",")
-        conn.commit()
-    except (Exception, psycopg2.DatabaseError) as error:
-        os.remove(tmp_df)
-        print("Error: %s" % error)
-        conn.rollback()
-        cursor.close()
-        return 1
-    print("copy_from_file() done")
-    cursor.close()
-    # os.remove(tmp_df)
-
-
-def copy_from_stringio(conn, df, table):
-    """
-    Here we are going save the dataframe in memory
-    and use copy_from() to copy it to the table
-    """
-    # save dataframe to an in memory buffer
-    buffer = StringIO()
-    df.to_csv(buffer, index=False, header=False)
-    buffer.seek(0)
-
-    cursor = conn.cursor()
-    try:
-        cursor.copy_from(buffer, table, sep=",")
-        conn.commit()
-    except (Exception, psycopg2.DatabaseError) as error:
-
-        print("Error: %s" % error)
-        conn.rollback()
-        cursor.close()
-        return 1
-    print("copy_from_stringio() done")
-    cursor.close()
-
-
+# Launch the script every X seconds
+# @tl.job(interval=timedelta(seconds=300))
 def main():
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s -  %(levelname)s - %(message)s')
+    logging.debug('starting link monitoring')
+    '''
+    Pushing collected data in DB
+    '''
+    conn = sql_conn()
+    cur = conn.cursor()
+
     with open("config.json") as json_data_file:
         data = json.load(json_data_file)
         for h in data['hosts']:
@@ -256,41 +237,70 @@ def main():
             '''
             Get logins connected to redback routers, store them in long_logins[] as dictionary{vlan: realm: user:}
             '''
-            # if brand == 'redback':
-            #     redbackSNMPWalk(data, ip, data['snmp']['version'], data['snmp']['community'])
+            if brand == 'redback':
+                redbackSNMPWalk(data, ip, data['snmp']['version'], data['snmp']['community'])
             '''
             Get logins connected to cisco routers, store them in long_logins[] as dictionary{vlan: realm: user:}
             '''
             if brand == 'cisco':
                 ciscoTotalSub(data, h, ip, data['snmp']['version'], data['snmp']['community'])
                 ciscoSNMPGet(data, h, ip, data['snmp']['version'], data['snmp']['community'])
+        '''
+        push time of this round in db
+        '''
+        cur.execute(update_round_timestamp, (psycopg2.TimestampFromTicks(time.time() // 1), 'last_round'))
+        '''
+        Update link status for long_logins in new format <IP.........-.-L--@realm>
+        '''
+        logging.debug('SQL connected logins')
+        logging.debug("--- %s seconds ---" % (time.time() - start_time))
+        for c_login in connected_logins:
+            link_logins.append(c_login[0][:12])
+            short_logins.add(c_login[0])
+        c_logins = set(tuple(i) for i in connected_logins)
+        psycopg2.extras.execute_values(cur, upsert, c_logins)
+        conn.commit()
 
-    df_connected = pd.DataFrame(data=dict_connected)
+        logging.debug('SQL select all')
+        logging.debug("--- %s seconds ---" % (time.time() - start_time))
+        cur.execute(select_all_query)
+        select_all = cur.fetchall()
+        for db_login, db_last_down, db_last_up, db_link_status, db_type, db_login_status in select_all:
+            db_logins.append(
+                (
+                    db_login,
+                    db_last_down,
+                    db_last_up,
+                    db_link_status,
+                    db_type,
+                    db_login_status
+                )
+            )
 
-    conn = connect(param_dic)
-    sql = """SELECT * FROM old_login;"""
-    df_db = pd.read_sql_query(sql, conn)
-    conn.close()
-
-    frames = [df_connected, df_db]
-    result = pd.concat(frames)
-
-    print(df_db)
-    print(df_connected)
-
-
-
-    # result.to_csv(r'export_dataframe.csv', index=False, header=True)
-
-    #print(result)
-
-    # conn = connect(param_dic)  # connect to the database
-    # # copy_from_stringio(conn, df, 'old_login')  # copy the dataframe to SQL
-    # copy_from_file(conn, df, 'old_login')  # copy the dataframe to SQL
-    # conn.close()  # close the connection
+        logging.debug('SQL db_login')
+        logging.debug("--- %s seconds ---" % (time.time() - start_time))
+        """
+        For each login in db_login check if username(db_login[0]) is in short_login,
+        if not set login status db_login[5] to False
+        """
+        [db_login[5] is False for db_login in db_logins if db_login[0] not in short_logins]
+        """
+        Same check for 12 first caracters of username for link status
+        """
+        [db_login[3] is False if db_login[0][:12] not in link_logins else db_login[3] is True for db_login in db_logins]
+        c_logins = set(tuple(i) for i in db_logins)
+        psycopg2.extras.execute_values(cur, upsert, c_logins)
+        '''
+        SQL commit
+        '''
+        conn.commit()
+        conn.close()
+    logging.debug("PostgreSQL connection pool is closed")
+    logging.debug("stopping link monitoring")
 
 
 if __name__ == "__main__":
     start_time = time.time()
+    # tl.start(block=True)
     main()
     print("--- %s seconds ---" % (time.time() - start_time))

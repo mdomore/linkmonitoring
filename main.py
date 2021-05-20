@@ -211,10 +211,10 @@ def loginClassify(data, realm):
 
 def sql_conn():
     conn = psycopg2.connect(
-        host="172.22.0.11",
-        database="login_status",
-        user="postgres",
-        password="MilKa;MeuH")
+        host="10.10.10.1",
+        database="database_name",
+        user="user",
+        password="password")
     return conn
 
 
